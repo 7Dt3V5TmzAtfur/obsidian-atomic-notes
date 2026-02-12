@@ -1,0 +1,10 @@
+{
+  "id": "atomic-notes",
+  "name": "Atomic Notes",
+  "version": "0.1.0",
+  "minAppVersion": "1.0.0",
+  "description": "将混乱笔记智能拆解为原子化知识卡片，自动建立关联",
+  "author": "Your Name",
+  "authorUrl": "https://github.com/yourusername/obsidian-atomic-notes",
+  "isDesktopOnly": false
+}

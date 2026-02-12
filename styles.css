@@ -1,0 +1,119 @@
+/* Atomic Notes Plugin Styles */
+
+/* 进度条样式 */
+.atomic-notes-progress-container {
+  width: 100%;
+  height: 8px;
+  background-color: var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 1em;
+}
+
+.atomic-notes-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--interactive-accent), var(--interactive-accent-hover));
+  transition: width 0.3s ease;
+}
+
+.atomic-notes-status {
+  color: var(--text-muted);
+  text-align: center;
+  margin: 1em 0;
+}
+
+/* 预览窗口样式 */
+.atomic-notes-preview {
+  min-width: 600px;
+  max-width: 800px;
+}
+
+.atomic-notes-summary {
+  color: var(--text-muted);
+  margin-bottom: 1em;
+}
+
+.atomic-notes-card-list {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 0.5em;
+  margin-bottom: 1em;
+}
+
+.atomic-notes-card-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.5em;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+}
+
+.atomic-notes-card-item:hover {
+  background-color: var(--background-modifier-hover);
+}
+
+.atomic-notes-card-item.active {
+  background-color: var(--background-modifier-border);
+}
+
+.tag-badge {
+  font-size: 0.8em;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background-color: var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.tag-认知观念 { background-color: #ff6b6b; color: white; }
+.tag-方法工具 { background-color: #4ecdc4; color: white; }
+.tag-行动指南 { background-color: #45b7d1; color: white; }
+.tag-资源列表 { background-color: #f7b731; color: white; }
+.tag-案例实战 { background-color: #5f27cd; color: white; }
+
+/* 卡片详情样式 */
+.atomic-notes-card-detail {
+  padding: 1em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background-color: var(--background-primary);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.atomic-notes-card-detail h3 {
+  margin-top: 0;
+  color: var(--text-normal);
+}
+
+.atomic-notes-card-detail > div {
+  margin-bottom: 1em;
+}
+
+.atomic-notes-card-detail .tag {
+  display: inline-block;
+  margin-right: 0.5em;
+  padding: 2px 8px;
+  background-color: var(--background-modifier-border);
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+.atomic-notes-card-detail code {
+  background-color: var(--code-background);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font-monospace);
+  margin-right: 0.5em;
+}
+
+/* 按钮容器 */
+.atomic-notes-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+  margin-top: 1em;
+}

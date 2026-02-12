@@ -1,0 +1,29 @@
+{
+  "name": "obsidian-atomic-notes",
+  "version": "0.1.0",
+  "description": "将混乱笔记智能拆解为原子化知识卡片",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  },
+  "keywords": [
+    "obsidian",
+    "plugin",
+    "atomic-notes",
+    "knowledge-management",
+    "zettelkasten"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@typescript-eslint/eslint-plugin": "^6.15.0",
+    "@typescript-eslint/parser": "^6.15.0",
+    "builtin-modules": "^3.3.0",
+    "esbuild": "^0.19.10",
+    "obsidian": "latest",
+    "tslib": "^2.6.2",
+    "typescript": "^5.3.3"
+  }
+}
