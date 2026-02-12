@@ -1,5 +1,6 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, PluginSettingTab, Setting, Modal, Notice } from 'obsidian';
 import AtomicNotesPlugin from './main';
+import { LLMService } from './services/llm-service';
 
 export class AtomicNotesSettingTab extends PluginSettingTab {
   plugin: AtomicNotesPlugin;
@@ -152,5 +153,103 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         })
       );
+
+    // 添加横幅
+    new Setting(containerEl)
+      .setName('添加横幅')
+      .setDesc('在原笔记底部添加拆解信息横幅（仅当保留原笔记时生效）')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.addBanner)
+        .onChange(async (value) => {
+          this.plugin.settings.addBanner = value;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    // 高级设置
+    containerEl.createEl('h3', { text: '高级设置' });
+
+    // 提示词自定义开关
+    new Setting(containerEl)
+      .setName('使用自定义提示词')
+      .setDesc('启用后可以自定义 LLM 拆解提示词')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.useCustomPrompt)
+        .onChange(async (value) => {
+          this.plugin.settings.useCustomPrompt = value;
+          await this.plugin.saveSettings();
+          this.display(); // 重新渲染以显示/隐藏文本框
+        })
+      );
+
+    // 仅当启用自定义提示词时显示编辑区域
+    if (this.plugin.settings.useCustomPrompt) {
+      // 提示词注意事项
+      const noticeEl = containerEl.createDiv('setting-item-description');
+      noticeEl.style.marginBottom = '10px';
+      noticeEl.innerHTML = `
+        <strong>📝 提示词注意事项：</strong>
+        <ul style="margin: 8px 0; padding-left: 20px;">
+          <li>使用 <code>{noteContent}</code> 占位符表示笔记内容</li>
+          <li>使用 <code>{granularity}</code> 占位符表示拆解粒度</li>
+          <li>必须要求 LLM 输出 JSON 格式</li>
+          <li>JSON 结构必须包含 cards 数组</li>
+          <li>每个卡片必须包含：title, description, tags, content, explanation, relations, position</li>
+          <li>relations 必须是包含 logic 和 concept 的对象数组</li>
+        </ul>
+      `;
+
+      // 自定义提示词文本框
+      new Setting(containerEl)
+        .setName('自定义提示词')
+        .setDesc('留空则使用默认提示词')
+        .addTextArea(text => {
+          text
+            .setPlaceholder('在此输入自定义提示词...')
+            .setValue(this.plugin.settings.customPrompt)
+            .onChange(async (value) => {
+              this.plugin.settings.customPrompt = value;
+              await this.plugin.saveSettings();
+            });
+
+          // 设置文本框样式
+          text.inputEl.rows = 15;
+          text.inputEl.style.width = '100%';
+          text.inputEl.style.fontFamily = 'monospace';
+          text.inputEl.style.fontSize = '12px';
+        });
+
+      // 操作按钮区域
+      const buttonContainer = containerEl.createDiv();
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.gap = '10px';
+      buttonContainer.style.marginTop = '10px';
+
+      // 重置为默认提示词按钮
+      const resetButton = buttonContainer.createEl('button', {
+        text: '📋 重置为默认提示词',
+        cls: 'mod-cta'
+      });
+      resetButton.onclick = async () => {
+        this.plugin.settings.customPrompt = LLMService.getDefaultPromptTemplate();
+        await this.plugin.saveSettings();
+        this.display(); // 重新渲染
+        new Notice('已重置为默认提示词');
+      };
+
+      // 查看默认提示词按钮
+      const viewDefaultButton = buttonContainer.createEl('button', {
+        text: '👁️ 查看默认提示词'
+      });
+      viewDefaultButton.onclick = () => {
+        const modal = new Modal(this.app);
+        modal.titleEl.setText('默认提示词');
+        modal.contentEl.createEl('pre', {
+          text: LLMService.getDefaultPromptTemplate(),
+          cls: 'language-text'
+        }).style.cssText = 'background: var(--background-secondary); padding: 15px; border-radius: 5px; max-height: 400px; overflow-y: auto; font-size: 12px;';
+        modal.open();
+      };
+    }
   }
 }

@@ -6,6 +6,7 @@ export class PreviewModal extends Modal {
   private currentIndex: number = 0;
   private onAccept: (cards: AtomicCard[]) => void;
   private cardContentEl: HTMLElement;
+  private cardListEl: HTMLElement;
 
   constructor(
     app: App,
@@ -13,59 +14,46 @@ export class PreviewModal extends Modal {
     onAccept: (cards: AtomicCard[]) => void
   ) {
     super(app);
-    this.cards = cards;
+    this.cards = [...cards]; // 复制数组，避免直接修改原数组
     this.onAccept = onAccept;
   }
 
   onOpen() {
-    const { contentEl } = this;
+    const { contentEl, modalEl } = this;
+
+    // 直接设置模态框尺寸
+    modalEl.style.width = '90vw';
+    modalEl.style.maxWidth = '1400px';
+    modalEl.style.height = '90vh';
+
     contentEl.empty();
     contentEl.addClass('atomic-notes-preview');
 
-    // 标题
-    contentEl.createEl('h2', { text: '拆解结果预览' });
-    contentEl.createEl('p', {
+    // 标题区域
+    const headerEl = contentEl.createDiv('atomic-notes-preview-header');
+    headerEl.createEl('h2', { text: '📝 拆解结果预览' });
+    headerEl.createEl('p', {
       text: `共识别到 ${this.cards.length} 个原子概念`,
       cls: 'atomic-notes-summary',
     });
 
-    // 卡片列表
-    const listContainer = contentEl.createDiv('atomic-notes-card-list');
-    this.cards.forEach((card, index) => {
-      const item = listContainer.createDiv('atomic-notes-card-item');
-      if (index === this.currentIndex) {
-        item.addClass('active');
-      }
+    // 主体区域（左右布局）
+    const mainContainer = contentEl.createDiv('atomic-notes-preview-main');
 
-      const checkbox = item.createEl('input', { type: 'checkbox' });
-      checkbox.checked = true;
-      checkbox.addEventListener('change', () => {
-        if (!checkbox.checked) {
-          this.cards.splice(index, 1);
-          this.render();
-        }
-      });
+    // 左侧：卡片列表
+    const leftPanel = mainContainer.createDiv('atomic-notes-preview-left');
+    leftPanel.createEl('h3', { text: '卡片列表' });
+    this.cardListEl = leftPanel.createDiv('atomic-notes-card-list');
+    this.renderCardList();
 
-      const tagBadge = item.createEl('span', {
-        text: card.tags[0],
-        cls: `tag-badge tag-${card.tags[0]}`,
-      });
-
-      const title = item.createEl('span', { text: card.title });
-
-      item.addEventListener('click', () => {
-        this.currentIndex = index;
-        this.render();
-      });
-    });
-
-    // 卡片详情
-    this.cardContentEl = contentEl.createDiv('atomic-notes-card-detail');
+    // 右侧：卡片详情
+    const rightPanel = mainContainer.createDiv('atomic-notes-preview-right');
+    rightPanel.createEl('h3', { text: '卡片详情' });
+    this.cardContentEl = rightPanel.createDiv('atomic-notes-card-detail');
     this.renderCardDetail();
 
-    // 操作按钮
+    // 底部：操作按钮
     const buttonContainer = contentEl.createDiv('atomic-notes-buttons');
-
     new Setting(buttonContainer)
       .addButton(btn => btn
         .setButtonText('取消')
@@ -75,16 +63,88 @@ export class PreviewModal extends Modal {
         .setButtonText('全部接受')
         .setCta()
         .onClick(() => {
+          if (this.cards.length === 0) {
+            return;
+          }
           this.onAccept(this.cards);
           this.close();
         })
       );
   }
 
+  private renderCardList() {
+    if (!this.cardListEl) return;
+    this.cardListEl.empty();
+
+    if (this.cards.length === 0) {
+      this.cardListEl.createEl('p', {
+        text: '所有卡片已被移除',
+        cls: 'atomic-notes-empty'
+      });
+      return;
+    }
+
+    this.cards.forEach((card, index) => {
+      const item = this.cardListEl.createDiv('atomic-notes-card-item');
+      if (index === this.currentIndex) {
+        item.addClass('active');
+      }
+
+      // 卡片序号
+      item.createEl('span', {
+        text: `${index + 1}`,
+        cls: 'card-number'
+      });
+
+      // 标签徽章
+      const tagBadge = item.createEl('span', {
+        text: card.tags[0],
+        cls: 'tag-badge',
+      });
+
+      // 卡片标题
+      const titleEl = item.createEl('span', {
+        text: card.title,
+        cls: 'card-title'
+      });
+
+      // 点击切换卡片
+      item.addEventListener('click', (e) => {
+        if (!(e.target as HTMLElement).classList.contains('card-remove')) {
+          this.currentIndex = index;
+          this.renderCardList();
+          this.renderCardDetail();
+        }
+      });
+
+      // 删除按钮
+      const removeBtn = item.createEl('span', {
+        text: '×',
+        cls: 'card-remove',
+      });
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.cards.splice(index, 1);
+        if (this.currentIndex >= this.cards.length) {
+          this.currentIndex = Math.max(0, this.cards.length - 1);
+        }
+        this.renderCardList();
+        this.renderCardDetail();
+      });
+    });
+  }
+
   private renderCardDetail() {
     if (!this.cardContentEl) return;
-
     this.cardContentEl.empty();
+
+    if (this.cards.length === 0) {
+      this.cardContentEl.createEl('p', {
+        text: '没有可显示的卡片',
+        cls: 'atomic-notes-empty'
+      });
+      return;
+    }
 
     const card = this.cards[this.currentIndex];
     if (!card) return;
@@ -93,53 +153,61 @@ export class PreviewModal extends Modal {
     this.cardContentEl.createEl('h3', { text: card.title });
 
     // Description
-    const desc = this.cardContentEl.createDiv('card-description');
-    desc.createEl('strong', { text: 'Description: ' });
-    desc.createSpan({ text: card.description });
+    const descSection = this.cardContentEl.createDiv('detail-section');
+    descSection.createEl('h4', { text: '📄 简述' });
+    descSection.createEl('p', { text: card.description });
 
     // Tags
-    const tags = this.cardContentEl.createDiv('card-tags');
-    tags.createEl('strong', { text: 'Tags: ' });
+    const tagsSection = this.cardContentEl.createDiv('detail-section');
+    tagsSection.createEl('h4', { text: '🏷️ 标签' });
+    const tagsContainer = tagsSection.createDiv('tags-container');
     card.tags.forEach(tag => {
-      tags.createEl('span', { text: tag, cls: 'tag' });
+      tagsContainer.createEl('span', { text: tag, cls: 'tag' });
     });
 
     // Content
-    const content = this.cardContentEl.createDiv('card-content');
-    content.createEl('strong', { text: '内容: ' });
-    content.createEl('p', { text: card.content });
+    const contentSection = this.cardContentEl.createDiv('detail-section');
+    contentSection.createEl('h4', { text: '📝 内容' });
+    contentSection.createEl('p', { text: card.content, cls: 'card-content-text' });
 
     // Explanation
-    const explanation = this.cardContentEl.createDiv('card-explanation');
-    explanation.createEl('strong', { text: '说明: ' });
-    explanation.createSpan({ text: card.explanation });
+    const explanationSection = this.cardContentEl.createDiv('detail-section');
+    explanationSection.createEl('h4', { text: '💡 说明' });
+    explanationSection.createEl('p', { text: card.explanation });
 
     // Relations
-    if (card.relations.length > 0) {
-      const relations = this.cardContentEl.createDiv('card-relations');
-      relations.createEl('strong', { text: '关联: ' });
+    if (card.relations && card.relations.length > 0) {
+      const relationsSection = this.cardContentEl.createDiv('detail-section');
+      relationsSection.createEl('h4', { text: '🔗 关联笔记' });
+      const relContainer = relationsSection.createDiv('relations-container');
       card.relations.forEach(rel => {
-        relations.createEl('code', { text: `[[${rel}]]` });
+        relContainer.createEl('code', { text: `[[${rel}]]`, cls: 'relation-link' });
       });
     }
 
     // Position
-    if (card.position.parent || card.position.children) {
-      const position = this.cardContentEl.createDiv('card-position');
-      position.createEl('strong', { text: '位置: ' });
+    if (card.position && (card.position.parent || (card.position.children && card.position.children.length > 0))) {
+      const positionSection = this.cardContentEl.createDiv('detail-section');
+      positionSection.createEl('h4', { text: '📍 知识位置' });
+
       if (card.position.parent) {
-        position.createEl('p', { text: `↑ ${card.position.parent}` });
+        const parentEl = positionSection.createDiv('position-item');
+        parentEl.createEl('span', { text: '↑ 向上追溯: ', cls: 'position-label' });
+        parentEl.createEl('code', { text: `[[${card.position.parent}]]` });
       }
-      if (card.position.children) {
-        position.createEl('p', {
-          text: `↓ ${card.position.children.join(', ')}`,
+
+      if (card.position.children && card.position.children.length > 0) {
+        const childrenEl = positionSection.createDiv('position-item');
+        childrenEl.createEl('span', { text: '↓ 向下拆解: ', cls: 'position-label' });
+        const childrenContainer = childrenEl.createSpan();
+        card.position.children.forEach((child, idx) => {
+          childrenContainer.createEl('code', { text: `[[${child}]]` });
+          if (idx < card.position.children!.length - 1) {
+            childrenContainer.createSpan({ text: ', ' });
+          }
         });
       }
     }
-  }
-
-  private render() {
-    this.onOpen();
   }
 
   onClose() {

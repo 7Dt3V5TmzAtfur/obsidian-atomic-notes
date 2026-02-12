@@ -1,119 +1,384 @@
 /* Atomic Notes Plugin Styles */
 
-/* 进度条样式 */
+/* Progress Modal */
+.atomic-notes-progress-modal {
+  padding: 20px;
+  min-width: 400px;
+}
+
+.atomic-notes-progress-modal h2 {
+  margin-bottom: 20px;
+  text-align: center;
+  color: var(--text-normal);
+}
+
+.atomic-notes-status {
+  text-align: center;
+  margin: 15px 0;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
 .atomic-notes-progress-container {
   width: 100%;
-  height: 8px;
+  height: 20px;
   background-color: var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: 10px;
   overflow: hidden;
-  margin-top: 1em;
+  margin: 15px 0;
 }
 
 .atomic-notes-progress-bar {
   height: 100%;
   background: linear-gradient(90deg, var(--interactive-accent), var(--interactive-accent-hover));
-  transition: width 0.3s ease;
+  border-radius: 10px;
+  transition: width 0.3s ease-in-out;
 }
 
-.atomic-notes-status {
-  color: var(--text-muted);
+.atomic-notes-percent {
   text-align: center;
-  margin: 1em 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-top: 10px;
 }
 
-/* 预览窗口样式 */
+/* ===== Preview Modal 美化样式 ===== */
+
 .atomic-notes-preview {
-  min-width: 600px;
-  max-width: 800px;
+  padding: 0 !important;
+  max-width: 95vw;
+  width: 1400px;
+  height: 90vh;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 头部区域 */
+.atomic-notes-preview-header {
+  padding: 24px 30px 20px;
+  border-bottom: 2px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.atomic-notes-preview-header h2 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--text-normal);
 }
 
 .atomic-notes-summary {
+  margin: 0;
+  font-size: 14px;
   color: var(--text-muted);
-  margin-bottom: 1em;
+  font-weight: 500;
+}
+
+/* 主体区域 - 左右布局 */
+.atomic-notes-preview-main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* 左侧面板 - 卡片列表 */
+.atomic-notes-preview-left {
+  width: 320px;
+  border-right: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.atomic-notes-preview-left h3 {
+  margin: 0;
+  padding: 16px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
 }
 
 .atomic-notes-card-list {
-  max-height: 200px;
+  flex: 1;
   overflow-y: auto;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  padding: 0.5em;
-  margin-bottom: 1em;
+  padding: 8px;
 }
 
+/* 卡片列表项 */
 .atomic-notes-card-item {
   display: flex;
   align-items: center;
-  gap: 0.5em;
-  padding: 0.5em;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 6px;
+  border-radius: 8px;
   cursor: pointer;
-  border-radius: 4px;
-  transition: background-color 0.2s;
+  transition: all 0.2s ease;
+  background: var(--background-primary);
+  border: 1px solid transparent;
+  position: relative;
 }
 
 .atomic-notes-card-item:hover {
-  background-color: var(--background-modifier-hover);
+  background: var(--background-secondary);
+  border-color: var(--background-modifier-border);
+  transform: translateX(2px);
 }
 
 .atomic-notes-card-item.active {
-  background-color: var(--background-modifier-border);
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.tag-badge {
-  font-size: 0.8em;
-  padding: 2px 8px;
-  border-radius: 3px;
-  background-color: var(--background-modifier-border);
-  color: var(--text-normal);
+.atomic-notes-card-item .card-number {
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-modifier-border);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 
-.tag-认知观念 { background-color: #ff6b6b; color: white; }
-.tag-方法工具 { background-color: #4ecdc4; color: white; }
-.tag-行动指南 { background-color: #45b7d1; color: white; }
-.tag-资源列表 { background-color: #f7b731; color: white; }
-.tag-案例实战 { background-color: #5f27cd; color: white; }
+.atomic-notes-card-item.active .card-number {
+  background: rgba(255, 255, 255, 0.3);
+  color: var(--text-on-accent);
+}
 
-/* 卡片详情样式 */
-.atomic-notes-card-detail {
-  padding: 1em;
-  border: 1px solid var(--background-modifier-border);
+.atomic-notes-card-item .tag-badge {
+  padding: 3px 8px;
   border-radius: 4px;
-  background-color: var(--background-primary);
-  max-height: 400px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.atomic-notes-card-item.active .tag-badge {
+  background: rgba(255, 255, 255, 0.25);
+  color: var(--text-on-accent);
+}
+
+.atomic-notes-card-item .card-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.atomic-notes-card-item .card-remove {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.atomic-notes-card-item:hover .card-remove {
+  opacity: 1;
+}
+
+.atomic-notes-card-item .card-remove:hover {
+  background: var(--background-modifier-error);
+  color: var(--text-error);
+}
+
+/* 右侧面板 - 卡片详情 */
+.atomic-notes-preview-right {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--background-primary);
+}
+
+.atomic-notes-preview-right h3 {
+  margin: 0;
+  padding: 16px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+}
+
+.atomic-notes-card-detail {
+  flex: 1;
   overflow-y: auto;
+  padding: 24px 30px;
 }
 
 .atomic-notes-card-detail h3 {
-  margin-top: 0;
+  margin: 0 0 20px 0;
+  font-size: 22px;
+  font-weight: 600;
   color: var(--text-normal);
+  padding-bottom: 12px;
+  border-bottom: 2px solid var(--interactive-accent);
 }
 
-.atomic-notes-card-detail > div {
-  margin-bottom: 1em;
+/* 详情区块 */
+.detail-section {
+  margin-bottom: 24px;
 }
 
-.atomic-notes-card-detail .tag {
-  display: inline-block;
-  margin-right: 0.5em;
-  padding: 2px 8px;
-  background-color: var(--background-modifier-border);
-  border-radius: 3px;
-  font-size: 0.9em;
+.detail-section h4 {
+  margin: 0 0 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.atomic-notes-card-detail code {
-  background-color: var(--code-background);
-  padding: 2px 6px;
-  border-radius: 3px;
+.detail-section p {
+  margin: 0;
+  line-height: 1.7;
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.card-content-text {
+  padding: 12px 16px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  border-left: 3px solid var(--interactive-accent);
+}
+
+/* 标签容器 */
+.tags-container {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tags-container .tag {
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+/* 关联笔记 */
+.relations-container {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.relations-container .relation-link {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--background-secondary);
+  color: var(--text-accent);
+  border: 1px solid var(--background-modifier-border);
   font-family: var(--font-monospace);
-  margin-right: 0.5em;
 }
 
-/* 按钮容器 */
+.relations-container .relation-link:hover {
+  background: var(--background-modifier-border);
+}
+
+/* 知识位置 */
+.position-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+
+.position-label {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.position-item code {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--background-primary);
+  color: var(--text-accent);
+  border: 1px solid var(--background-modifier-border);
+  font-family: var(--font-monospace);
+}
+
+/* 空状态 */
+.atomic-notes-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+/* 底部按钮区域 */
 .atomic-notes-buttons {
+  padding: 16px 30px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
   display: flex;
   justify-content: flex-end;
-  gap: 0.5em;
-  margin-top: 1em;
+}
+
+.atomic-notes-buttons .setting-item {
+  border: none;
+  padding: 0;
+}
+
+.atomic-notes-buttons .setting-item-control {
+  gap: 12px;
+}
+
+/* 滚动条美化 */
+.atomic-notes-card-list::-webkit-scrollbar,
+.atomic-notes-card-detail::-webkit-scrollbar {
+  width: 8px;
+}
+
+.atomic-notes-card-list::-webkit-scrollbar-track,
+.atomic-notes-card-detail::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.atomic-notes-card-list::-webkit-scrollbar-thumb,
+.atomic-notes-card-detail::-webkit-scrollbar-thumb {
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+}
+
+.atomic-notes-card-list::-webkit-scrollbar-thumb:hover,
+.atomic-notes-card-detail::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
 }

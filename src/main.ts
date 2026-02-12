@@ -67,8 +67,8 @@ export default class AtomicNotesPlugin extends Plugin {
   }
 
   async decomposeNote(file: TFile) {
-    // 检查 API Key
-    if (!this.settings.apiKey) {
+    // 检查 API Key（Ollama 可能不需要）
+    if (this.settings.provider !== 'ollama' && !this.settings.apiKey) {
       new Notice('请先在设置中配置 API Key');
       return;
     }
@@ -85,23 +85,59 @@ export default class AtomicNotesPlugin extends Plugin {
     progressModal.open();
 
     try {
-      // 调用 LLM 拆解
-      progressModal.updateProgress('正在分析笔记结构...', 30);
+      // 步骤1: 分析笔记结构 (0-30%)
+      progressModal.updateProgress(10);
+
       const response = await this.llmService.decompose(content);
 
       if (!response.success || !response.data) {
-        throw new Error(response.error || '拆解失败');
+        throw new Error(response.error || 'LLM 拆解失败');
       }
 
-      progressModal.updateProgress('正在识别关联概念...', 60);
       const cards = response.data.cards;
 
-      // 验证关联概念
-      for (const card of cards) {
-        card.relations = this.linkResolver.validateConcepts(card.relations);
+      if (!cards || cards.length === 0) {
+        throw new Error('未能识别到任何原子概念，请检查笔记内容');
       }
 
-      progressModal.updateProgress('完成！', 100);
+      // 步骤2: 识别核心概念 (30-60%)
+      progressModal.updateProgress(45);
+
+      // 优化关联概念：尝试匹配现有笔记，但保留无法匹配的概念
+      for (const card of cards) {
+        if (card.relations && card.relations.length > 0) {
+          // 提取概念名称进行验证
+          const concepts = card.relations.map(r => r.concept);
+          const validated = this.linkResolver.validateConcepts(concepts);
+
+          // 如果找到了匹配的笔记，更新概念名称；否则保留原始概念
+          if (validated.length > 0) {
+            // 更新每个关联的 concept 为匹配到的笔记名
+            card.relations = card.relations.map((r, index) => ({
+              logic: r.logic,
+              concept: validated[index] || r.concept  // 使用验证结果或保留原值
+            }));
+          }
+          // 如果一个都没匹配到，保留 LLM 原始的概念名称
+        }
+      }
+
+      // 步骤3: 建立关联 (60-90%)
+      progressModal.updateProgress(75);
+
+      // 短暂延迟，让用户看到进度
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      // 步骤4: 生成卡片 (90-100%)
+      progressModal.updateProgress(95);
+
+      // 短暂延迟
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      progressModal.updateProgress(100);
+
+      // 短暂延迟后关闭进度窗口
+      await new Promise(resolve => setTimeout(resolve, 200));
       progressModal.close();
 
       // 显示预览窗口
@@ -115,46 +151,127 @@ export default class AtomicNotesPlugin extends Plugin {
     } catch (error) {
       progressModal.close();
       console.error('拆解失败:', error);
-      new Notice(`拆解失败: ${error.message}`);
+
+      // 友好的错误提示
+      let errorMessage = '拆解失败';
+      let canRetry = false;
+
+      if (error instanceof Error) {
+        if (error.message.includes('API') || error.message.includes('网络') || error.message.includes('fetch')) {
+          errorMessage = '网络连接失败，请检查网络或 API Key 配置';
+          canRetry = true;
+        } else if (error.message.includes('解析') || error.message.includes('JSON')) {
+          errorMessage = 'AI 响应格式错误，建议重试';
+          canRetry = true;
+        } else if (error.message.includes('API Key') || error.message.includes('apiKey')) {
+          errorMessage = '请先在设置中配置有效的 API Key';
+          canRetry = false;
+        } else if (error.message.includes('未能识别')) {
+          errorMessage = '笔记内容无法拆解，请确保笔记包含足够的知识内容';
+          canRetry = false;
+        } else {
+          errorMessage = `拆解失败: ${error.message}`;
+          canRetry = true;
+        }
+      }
+
+      // 显示错误通知
+      new Notice(`❌ ${errorMessage}${canRetry ? '\n\n💡 提示：可以再次尝试' : ''}`, 6000);
     }
   }
 
   async createCards(sourceFile: TFile, cards: AtomicCard[]) {
     try {
+      // 检查是否有卡片要创建
+      if (!cards || cards.length === 0) {
+        new Notice('没有卡片需要创建');
+        return;
+      }
+
       // 确定保存位置
-      const folder = this.settings.defaultFolder ||
-        sourceFile.parent?.path || '';
+      const parentPath = sourceFile.parent?.path || '';
+      const cardFolder = this.settings.defaultFolder
+        ? `${this.settings.defaultFolder}/${sourceFile.basename}-atomic`
+        : (parentPath ? `${parentPath}/${sourceFile.basename}-atomic` : `${sourceFile.basename}-atomic`);
 
-      const cardFolder = folder
-        ? `${folder}/${sourceFile.basename}-atomic`
-        : `${sourceFile.basename}-atomic`;
-
-      // 创建文件夹
+      // 创建文件夹（如果不存在）
       if (!await this.app.vault.adapter.exists(cardFolder)) {
         await this.app.vault.createFolder(cardFolder);
       }
 
       // 生成每张卡片
+      let successCount = 0;
+      let skipCount = 0;
+
       for (const card of cards) {
-        const fileName = `${cardFolder}/${card.title}.md`;
+        // 清理标题中的非法字符
+        const safeTitle = this.sanitizeFileName(card.title);
+        const fileName = `${cardFolder}/${safeTitle}.md`;
+
+        // 检查文件是否已存在
+        if (await this.app.vault.adapter.exists(fileName)) {
+          console.warn(`文件已存在，跳过: ${fileName}`);
+          skipCount++;
+          continue;
+        }
+
         const fileContent = this.generateCardMarkdown(card);
 
-        await this.app.vault.create(fileName, fileContent);
+        try {
+          await this.app.vault.create(fileName, fileContent);
+          successCount++;
+        } catch (err) {
+          console.error(`创建文件失败: ${fileName}`, err);
+          skipCount++;
+        }
       }
 
-      // 在原笔记添加横幅
-      if (this.settings.keepOriginalNote) {
-        const banner = `\n\n---\n## 📦 已拆解为原子卡片\n\n${cards.map(c => `- [[${c.title}]]`).join('\n')}\n`;
+      // 在原笔记添加横幅（仅当保留原笔记且启用横幅时）
+      if (this.settings.keepOriginalNote && this.settings.addBanner && successCount > 0) {
+        const timestamp = new Date().toISOString().split('T')[0];
+        const banner = `\n\n---\n## 📦 已拆解为原子卡片\n\n**拆解时间**: ${timestamp}\n**卡片数量**: ${successCount}\n**保存位置**: \`${cardFolder}\`\n\n${cards.slice(0, successCount).map(c => `- [[${this.sanitizeFileName(c.title)}]]`).join('\n')}\n`;
+
         const originalContent = await this.app.vault.read(sourceFile);
         await this.app.vault.modify(sourceFile, originalContent + banner);
       }
 
-      new Notice(`✅ 成功创建 ${cards.length} 张卡片到 ${cardFolder}`);
+      // 显示结果通知（Toast 通知）
+      if (successCount > 0) {
+        new Notice(`✅ 已生成 ${successCount} 张原子卡片${skipCount > 0 ? `（跳过 ${skipCount} 个已存在）` : ''}`, 5000);
+      } else {
+        new Notice('⚠️ 没有创建任何卡片', 4000);
+      }
 
     } catch (error) {
       console.error('创建卡片失败:', error);
-      new Notice(`创建卡片失败: ${error.message}`);
+
+      let errorMessage = '创建卡片失败';
+      if (error instanceof Error) {
+        if (error.message.includes('exist') || error.message.includes('EEXIST')) {
+          errorMessage = '文件夹创建失败，请检查文件权限';
+        } else if (error.message.includes('EACCES') || error.message.includes('permission')) {
+          errorMessage = '没有写入权限，请检查文件夹权限设置';
+        } else if (error.message.includes('ENOSPC')) {
+          errorMessage = '磁盘空间不足，请清理后重试';
+        } else {
+          errorMessage = `创建失败: ${error.message}`;
+        }
+      }
+
+      new Notice(`❌ ${errorMessage}`, 5000);
     }
+  }
+
+  /**
+   * 清理文件名中的非法字符
+   */
+  private sanitizeFileName(title: string): string {
+    // 移除或替换非法字符: \ / : * ? " < > |
+    return title
+      .replace(/[\\/:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 200); // 限制文件名长度
   }
 
   private generateCardMarkdown(card: AtomicCard): string {
@@ -169,7 +286,7 @@ tags: ${card.tags.join(', ')}
 - **说明**：${card.explanation}`;
 
     const relations = card.relations.length > 0
-      ? `\n- **关联**：${card.relations.map(r => `[[${r}]]`).join(' | ')}`
+      ? `\n- **关联**：${card.relations.map(r => `${r.logic} [[${r.concept}]]`).join('；')}`
       : '';
 
     const position = [];
