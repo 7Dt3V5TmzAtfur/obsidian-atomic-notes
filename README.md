@@ -208,4 +208,3 @@ MIT License
 
 ---
 
-**Built with ❤️ by Super Team**

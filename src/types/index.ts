@@ -28,6 +28,17 @@ export interface PluginSettings {
   // Templates
   templates: PromptTemplate[];
   activeTemplateId: string;
+
+  // History
+  history: DecompositionHistoryItem[];
+}
+
+export interface DecompositionHistoryItem {
+  id: string;
+  timestamp: number;
+  originalNotePath: string;
+  cardsGenerated: number;
+  status: 'success' | 'failed';
 }
 
 export interface PromptTemplate {
@@ -219,5 +230,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   smartTags: true,
 
   templates: [STANDARD_TEMPLATE, MEETING_TEMPLATE, CONCEPT_TEMPLATE],
-  activeTemplateId: 'standard'
+  activeTemplateId: 'standard',
+  history: []
 };

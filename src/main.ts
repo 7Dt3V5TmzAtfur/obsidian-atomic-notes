@@ -1,12 +1,13 @@
-import { Plugin, TFile, Notice, TFolder } from 'obsidian';
-import { PluginSettings, DEFAULT_SETTINGS, AtomicCard } from './types';
+import { Plugin, TFile, Notice, TFolder, WorkspaceLeaf } from 'obsidian';
+import { PluginSettings, DEFAULT_SETTINGS, AtomicCard, DecompositionHistoryItem } from './types';
 import { AtomicNotesSettingTab } from './settings';
 import { LLMService } from './services/llm-service';
 import { LinkResolver } from './services/link-resolver';
 import { UndoService, FileOperation } from './services/undo-service';
 import { CanvasService } from './services/canvas-service';
-import { ProgressModal } from './ui/progress-modal';
 import { PreviewModal } from './ui/preview-modal';
+import { StatusWidget } from './ui/status-widget';
+import { AtomicHistoryView, VIEW_TYPE_ATOMIC_HISTORY } from './ui/history-view';
 
 export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
@@ -14,6 +15,7 @@ export default class AtomicNotesPlugin extends Plugin {
   linkResolver: LinkResolver;
   undoService: UndoService;
   canvasService: CanvasService;
+  statusWidget: StatusWidget;
 
   async onload() {
     // 1. 加载设置
@@ -24,15 +26,28 @@ export default class AtomicNotesPlugin extends Plugin {
     this.linkResolver = new LinkResolver(this.app.vault);
     this.undoService = new UndoService(this.app);
     this.canvasService = new CanvasService();
+    this.statusWidget = new StatusWidget(this.app, this);
 
     // 3. 添加设置页面
     this.addSettingTab(new AtomicNotesSettingTab(this.app, this));
+
+    // 注册视图
+    this.registerView(
+      VIEW_TYPE_ATOMIC_HISTORY,
+      (leaf) => new AtomicHistoryView(leaf, this)
+    );
 
     // 4. 注册命令
     this.addCommand({
       id: 'decompose-note',
       name: '拆解当前笔记为原子卡片',
       callback: () => this.decomposeCurrentNote(),
+    });
+
+    this.addCommand({
+      id: 'open-history-view',
+      name: 'Show Decomposition History',
+      callback: () => this.activateHistoryView(),
     });
 
     this.addCommand({
@@ -68,6 +83,11 @@ export default class AtomicNotesPlugin extends Plugin {
       })
     );
 
+    // Ribbon Icon for History
+    this.addRibbonIcon('history', 'Atomic History', () => {
+      this.activateHistoryView();
+    });
+
     // 6. 监听 Vault 变化，重建索引
     this.registerEvent(
       this.app.vault.on('create', () => this.linkResolver.rebuildIndex())
@@ -78,6 +98,30 @@ export default class AtomicNotesPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on('rename', () => this.linkResolver.rebuildIndex())
     );
+  }
+
+  async activateHistoryView() {
+    const { workspace } = this.app;
+
+    let leaf: WorkspaceLeaf | null = null;
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_ATOMIC_HISTORY);
+
+    if (leaves.length > 0) {
+      // A leaf with our view already exists, use that
+      leaf = leaves[0];
+    } else {
+      // Our view could not be found in the workspace, create a new leaf
+      // in the right sidebar for it
+      leaf = workspace.getRightLeaf(false);
+      if (leaf) {
+        await leaf.setViewState({ type: VIEW_TYPE_ATOMIC_HISTORY, active: true });
+      }
+    }
+
+    // "Reveal" the leaf in case it is in a collapsed sidebar
+    if (leaf) {
+      workspace.revealLeaf(leaf);
+    }
   }
 
   async decomposeCurrentNote() {
@@ -118,17 +162,28 @@ export default class AtomicNotesPlugin extends Plugin {
       return;
     }
 
-    const progressModal = new ProgressModal(this.app);
-    progressModal.open();
-    progressModal.setBatchMode(files.length);
+    // Use Status Widget for batch mode?
+    // For now, keeping original ProgressModal logic for batch to avoid breaking it,
+    // or we could refactor it to use status widget too.
+    // The instructions focused on decomposeNote.
+    // But let's use the new non-blocking widget for consistency if possible.
+    // However, batch processing might need a different UI.
+    // Let's stick to the request: "Refactor decomposeNote... Remove ProgressModal usage".
+    // I will leave batchDecompose as is or minimally update if it breaks.
+    // Actually, I removed ProgressModal import, so I MUST update batchDecompose.
+
+    this.statusWidget.showFloatingWidget(`Batch Processing ${files.length} files`);
 
     const allOps: FileOperation[] = [];
     let successTotal = 0;
     let failTotal = 0;
+    let processed = 0;
 
     try {
       for (const file of files) {
-        progressModal.nextFile(file.basename);
+        processed++;
+        const percent = Math.round((processed / files.length) * 100);
+        this.statusWidget.updateProgress(percent, `Processing ${file.basename}...`);
 
         try {
           const content = await this.app.vault.read(file);
@@ -137,7 +192,7 @@ export default class AtomicNotesPlugin extends Plugin {
           }
 
           const cards = await this.processNoteAI(content, (p, msg) => {
-             progressModal.updateProgress(p, msg);
+             // Internal progress for single file, maybe ignore or sub-update
           }, file.basename);
 
           // false = Do not commit transaction yet
@@ -152,7 +207,7 @@ export default class AtomicNotesPlugin extends Plugin {
         }
       }
     } finally {
-      progressModal.close();
+      this.statusWidget.hideFloatingWidget(2000);
       if (allOps.length > 0) {
         this.undoService.addTransaction(allOps);
         new Notice(`批量处理完成: 成功 ${successTotal}, 失败 ${failTotal}. 已记录 Undo。`, 5000);
@@ -216,39 +271,47 @@ export default class AtomicNotesPlugin extends Plugin {
       return;
     }
 
-    // 显示进度窗口
-    const progressModal = new ProgressModal(this.app);
-    progressModal.open();
+    // 显示非阻塞状态组件
+    this.statusWidget.showFloatingWidget(`Decomposing: ${file.basename}`);
+    this.statusWidget.updateProgress(0, 'Starting...');
 
     try {
       // 复用 processNoteAI 逻辑
       const cards = await this.processNoteAI(content, (p, msg) => {
-        progressModal.updateProgress(p, msg);
+        this.statusWidget.updateProgress(p, msg);
       }, file.basename);
 
       // 步骤4: 生成卡片 (90-100%)
-      progressModal.updateProgress(95, '即将完成...');
+      this.statusWidget.updateProgress(95, 'Reviewing cards...');
 
       // 短暂延迟
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      progressModal.updateProgress(100);
+      // 完成状态，但在显示 PreviewModal 之前
+      this.statusWidget.hideFloatingWidget();
 
-      // 短暂延迟后关闭进度窗口
-      await new Promise(resolve => setTimeout(resolve, 200));
-      progressModal.close();
-
-      // 显示预览窗口
+      // 显示预览窗口 (Modals are blocking/interrupting by nature, but this is the decision point)
       const previewModal = new PreviewModal(
         this.app,
         cards,
-        (acceptedCards) => this.createCards(file, acceptedCards)
+        async (acceptedCards) => {
+            const ops = await this.createCards(file, acceptedCards);
+
+            // Record History
+            this.recordHistory(file, acceptedCards.length, 'success');
+
+            // Refresh View if open
+            // this.activateHistoryView(); // Optional: auto open history
+        }
       );
       previewModal.open();
 
     } catch (error) {
-      progressModal.close();
+      this.statusWidget.updateProgress(100, 'Failed', 'error');
       console.error('拆解失败:', error);
+
+      // Record History (Failed)
+      this.recordHistory(file, 0, 'failed');
 
       // 友好的错误提示
       let errorMessage = '拆解失败';
@@ -273,9 +336,33 @@ export default class AtomicNotesPlugin extends Plugin {
         }
       }
 
-      // 显示错误通知
-      new Notice(`❌ ${errorMessage}${canRetry ? '\n\n💡 提示：可以再次尝试' : ''}`, 6000);
+      new Notice(`❌ ${errorMessage}`, 6000);
+
+      // Hide widget after delay
+      setTimeout(() => {
+        this.statusWidget.hideFloatingWidget();
+      }, 3000);
     }
+  }
+
+  async recordHistory(file: TFile, count: number, status: 'success' | 'failed') {
+      const historyItem: DecompositionHistoryItem = {
+          id: Date.now().toString(),
+          timestamp: Date.now(),
+          originalNotePath: file.path,
+          cardsGenerated: count,
+          status: status
+      };
+
+      this.settings.history = this.settings.history || [];
+      this.settings.history.unshift(historyItem);
+
+      // Limit history size (e.g. 50 items)
+      if (this.settings.history.length > 100) {
+          this.settings.history = this.settings.history.slice(0, 100);
+      }
+
+      await this.saveSettings();
   }
 
   async createCards(sourceFile: TFile, cards: AtomicCard[], commitTransaction: boolean = true): Promise<FileOperation[]> {
@@ -292,9 +379,9 @@ export default class AtomicNotesPlugin extends Plugin {
 
       // 确定保存位置
       let parentPath = sourceFile.parent?.path || '';
-      if (parentPath === '/') parentPath = '';
+      parentPath = parentPath.replace(/^\/+|\/+$/g, '');
 
-      const defaultFolder = this.settings.defaultFolder ? this.settings.defaultFolder.replace(/\/$/, '') : '';
+      const defaultFolder = this.settings.defaultFolder ? this.settings.defaultFolder.replace(/^\/+|\/+$/g, '') : '';
 
       const cardFolder = defaultFolder
         ? `${defaultFolder}/${sourceFile.basename}-atomic`
@@ -372,7 +459,6 @@ export default class AtomicNotesPlugin extends Plugin {
         const banner = `> [!info] 📋 本笔记已拆解为原子卡片
 > **拆解时间**: ${timestamp}
 > **生成卡片**: ${cardLinks}
-> **操作**: [[撤销拆解|点击撤销]]
 >
 > ---
 >

@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting, Modal, Notice } from 'obsidian';
+import { App, PluginSettingTab, Setting, Modal, Notice, setIcon } from 'obsidian';
 import AtomicNotesPlugin from './main';
 import { PromptTemplate } from './types';
 import { LLMService } from './services/llm-service';
@@ -15,17 +15,24 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
+    // Inject styles for summary markers
+    containerEl.createEl('style', {
+        text: `
+        .atomic-notes-section > summary {
+            list-style: none !important;
+        }
+        .atomic-notes-section > summary::-webkit-details-marker {
+            display: none !important;
+        }
+        `
+    });
+
     containerEl.createEl('h2', { text: 'Atomic Notes 设置' });
 
     // =========================================================================
     // 1. API Configuration
     // =========================================================================
-    const apiSection = containerEl.createEl('details', { attr: { open: true } });
-    apiSection.createEl('summary', { text: '▼ API Configuration' }).style.fontWeight = 'bold';
-    apiSection.style.marginBottom = '20px';
-    const apiContent = apiSection.createDiv();
-    apiContent.style.paddingLeft = '10px';
-    apiContent.style.borderLeft = '2px solid var(--background-modifier-border)';
+    const apiContent = this.createSection(containerEl, 'API Configuration', true);
 
     new Setting(apiContent)
       .setName('LLM Provider')
@@ -127,12 +134,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // =========================================================================
     // 2. Decomposition Settings
     // =========================================================================
-    const decompSection = containerEl.createEl('details', { attr: { open: true } });
-    decompSection.createEl('summary', { text: '▼ Decomposition Settings' }).style.fontWeight = 'bold';
-    decompSection.style.marginBottom = '20px';
-    const decompContent = decompSection.createDiv();
-    decompContent.style.paddingLeft = '10px';
-    decompContent.style.borderLeft = '2px solid var(--background-modifier-border)';
+    const decompContent = this.createSection(containerEl, 'Decomposition Settings', true);
 
     new Setting(decompContent)
       .setName('拆解粒度 (Granularity)')
@@ -198,12 +200,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // =========================================================================
     // 3. Original Note Handling
     // =========================================================================
-    const originalSection = containerEl.createEl('details', { attr: { open: true } });
-    originalSection.createEl('summary', { text: '▼ Original Note Handling' }).style.fontWeight = 'bold';
-    originalSection.style.marginBottom = '20px';
-    const originalContent = originalSection.createDiv();
-    originalContent.style.paddingLeft = '10px';
-    originalContent.style.borderLeft = '2px solid var(--background-modifier-border)';
+    const originalContent = this.createSection(containerEl, 'Original Note Handling', true);
 
     new Setting(originalContent)
       .setName('保留并添加拆解横幅')
@@ -256,12 +253,7 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
     // =========================================================================
     // 4. Advanced Options
     // =========================================================================
-    const advancedSection = containerEl.createEl('details');
-    advancedSection.createEl('summary', { text: '▼ Advanced Options' }).style.fontWeight = 'bold';
-    advancedSection.style.marginBottom = '20px';
-    const advancedContent = advancedSection.createDiv();
-    advancedContent.style.paddingLeft = '10px';
-    advancedContent.style.borderLeft = '2px solid var(--background-modifier-border)';
+    const advancedContent = this.createSection(containerEl, 'Advanced Options', false);
 
     new Setting(advancedContent)
       .setName('最小笔记长度')
@@ -463,5 +455,59 @@ export class AtomicNotesSettingTab extends PluginSettingTab {
             }
         }
     };
+  }
+
+  private createSection(container: HTMLElement, title: string, isOpen: boolean = true): HTMLElement {
+    const details = container.createEl('details', {
+        cls: 'atomic-notes-section',
+        attr: { ...(isOpen ? { open: true } : {}) }
+    });
+
+    // Card-like style
+    details.style.marginBottom = '20px';
+    details.style.border = '1px solid var(--background-modifier-border)';
+    details.style.borderRadius = '8px';
+    details.style.backgroundColor = 'var(--background-primary-alt)';
+    details.style.overflow = 'hidden';
+
+    const summary = details.createEl('summary');
+    summary.style.display = 'flex';
+    summary.style.alignItems = 'center';
+    summary.style.justifyContent = 'space-between';
+    summary.style.cursor = 'pointer';
+    summary.style.padding = '10px';
+    summary.style.margin = '0';
+    summary.style.fontWeight = 'bold';
+    summary.style.outline = 'none';
+
+    const titleContainer = summary.createDiv();
+    titleContainer.style.display = 'flex';
+    titleContainer.style.alignItems = 'center';
+    titleContainer.style.gap = '10px';
+
+    // Custom Arrow Icon
+    const arrow = titleContainer.createDiv();
+    setIcon(arrow, 'chevron-right');
+    arrow.style.transition = 'transform 0.2s ease';
+    arrow.style.transform = isOpen ? 'rotate(90deg)' : 'rotate(0deg)';
+    arrow.style.color = 'var(--text-muted)';
+
+    const text = titleContainer.createDiv();
+    text.setText(title);
+
+    // Toggle arrow rotation
+    details.addEventListener('toggle', () => {
+        if (details.open) {
+            arrow.style.transform = 'rotate(90deg)';
+        } else {
+            arrow.style.transform = 'rotate(0deg)';
+        }
+    });
+
+    const content = details.createDiv();
+    content.style.padding = '15px';
+    content.style.borderTop = '1px solid var(--background-modifier-border)';
+
+    return content;
   }
 }

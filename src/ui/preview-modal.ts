@@ -32,7 +32,7 @@ export class PreviewModal extends Modal {
     // 2. Configure Modal Dimensions
     modalEl.addClass('atomic-notes-modal');
     modalEl.style.width = '90vw';
-    modalEl.style.maxWidth = '1400px';
+    modalEl.style.maxWidth = '95vw'; // Allow it to be wider on large screens
     modalEl.style.height = '85vh';
 
     contentEl.empty();
@@ -339,14 +339,17 @@ export class PreviewModal extends Modal {
         font-size: 1.1em;
         line-height: 1.7;
         min-height: 400px;
+        width: 100%;
         resize: none;
         border: none !important;
         padding: 0 !important;
         background: transparent !important;
+        box-shadow: none !important;
       }
 
       .atomic-content-editor:focus {
         box-shadow: none !important;
+        outline: none !important;
       }
 
       /* Toolbar */

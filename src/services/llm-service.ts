@@ -64,6 +64,26 @@ export class LLMService {
     }
   }
 
+  private async withRetry(fn: () => Promise<any>, maxRetries: number = 3): Promise<any> {
+    let retries = 0;
+    while (true) {
+        try {
+            return await fn();
+        } catch (error: any) {
+            // Check if error is 429 (Too Many Requests)
+            const status = error.status || error.statusCode;
+            if (status === 429 && retries < maxRetries) {
+                retries++;
+                const delay = Math.pow(2, retries) * 1000; // Exponential backoff: 2s, 4s, 8s
+                console.log(`Hit 429, retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+                continue;
+            }
+            throw error;
+        }
+    }
+  }
+
   private buildPrompts(template: PromptTemplate, content: string, title: string, tags: string[]): { systemPrompt: string, userPrompt: string } {
     const tagsString = tags.length > 0 ? tags.join(', ') : '(无)';
     const replaceVars = (str: string) => {
@@ -118,19 +138,21 @@ export class LLMService {
       body.system = systemPrompt;
     }
 
-    const response = await requestUrl({
-      url: 'https://api.anthropic.com/v1/messages',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.settings.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(body),
-    });
+    return this.withRetry(async () => {
+        const response = await requestUrl({
+            url: 'https://api.anthropic.com/v1/messages',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': this.settings.apiKey,
+                'anthropic-version': '2023-06-01',
+            },
+            body: JSON.stringify(body),
+        });
 
-    const data = response.json;
-    return data.content[0]?.text || '';
+        const data = response.json;
+        return data.content[0]?.text || '';
+    });
   }
 
   private async callOpenAICompatible(systemPrompt: string, userPrompt: string, maxTokens: number = 4096, images: string[] = []): Promise<string> {
@@ -200,15 +222,17 @@ export class LLMService {
         max_tokens: maxTokens,
     };
 
-    const response = await requestUrl({
-      url: endpoint,
-      method: 'POST',
-      headers,
-      body: JSON.stringify(requestBody),
-    });
+    return this.withRetry(async () => {
+        const response = await requestUrl({
+            url: endpoint,
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody),
+        });
 
-    const data = response.json;
-    return data.choices?.[0]?.message?.content || '';
+        const data = response.json;
+        return data.choices?.[0]?.message?.content || '';
+    });
   }
 
   private parseResponse(responseText: string): DecompositionResult {
