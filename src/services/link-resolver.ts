@@ -1,5 +1,8 @@
 import { TFile, Vault } from 'obsidian';
 
+const SIMILARITY_THRESHOLD = 0.3;
+const EXACT_MATCH_THRESHOLD = 0.9;
+
 export class LinkResolver {
   private vault: Vault;
   private noteIndex: Map<string, TFile> = new Map();
@@ -42,8 +45,8 @@ export class LinkResolver {
     for (const [name, file] of this.noteIndex) {
       const score = this.calculateSimilarity(conceptLower, name);
 
-      // 只保留相似度 > 0.3 的结果
-      if (score > 0.3) {
+      // 只保留相似度 > 阈值 的结果
+      if (score > SIMILARITY_THRESHOLD) {
         matches.push({ file, score });
       }
     }
@@ -62,7 +65,22 @@ export class LinkResolver {
   private calculateSimilarity(str1: string, str2: string): number {
     // 完全包含关系得分最高
     if (str2.includes(str1) || str1.includes(str2)) {
-      return 0.9;
+      return EXACT_MATCH_THRESHOLD;
+    }
+
+    const len1 = str1.length;
+    const len2 = str2.length;
+    const maxLen = Math.max(len1, len2);
+
+    // Performance optimization:
+    // If length difference is too large, similarity will definitely be low
+    // For Levenshtein distance: distance >= abs(len1 - len2)
+    // Similarity = 1 - distance / maxLen
+    // If we want Similarity > THRESHOLD, then:
+    // 1 - abs(len1 - len2)/maxLen > THRESHOLD
+    // abs(len1 - len2)/maxLen < 1 - THRESHOLD
+    if (maxLen > 0 && Math.abs(len1 - len2) / maxLen > (1 - SIMILARITY_THRESHOLD)) {
+        return 0;
     }
 
     // 单词级别匹配
@@ -82,7 +100,6 @@ export class LinkResolver {
 
     // 字符级别相似度
     const distance = this.levenshteinDistance(str1, str2);
-    const maxLen = Math.max(str1.length, str2.length);
     return Math.max(0, 1 - distance / maxLen);
   }
 

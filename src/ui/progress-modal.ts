@@ -6,6 +6,12 @@ export class ProgressModal extends Modal {
   private progressBarContainer: HTMLElement;
   private percentEl: HTMLElement;
 
+  // Batch processing state
+  private isBatch: boolean = false;
+  private totalFiles: number = 0;
+  private currentFileIndex: number = 0;
+  private batchStatusEl: HTMLElement;
+
   constructor(app: App) {
     super(app);
   }
@@ -17,6 +23,13 @@ export class ProgressModal extends Modal {
 
     // 标题
     contentEl.createEl('h2', { text: '🧩 正在拆解笔记' });
+
+    // 批量处理状态 (默认为空，启用时显示)
+    this.batchStatusEl = contentEl.createDiv({ cls: 'atomic-notes-batch-status' });
+    this.batchStatusEl.style.display = 'none';
+    this.batchStatusEl.style.marginBottom = '12px';
+    this.batchStatusEl.style.fontWeight = 'bold';
+    this.batchStatusEl.style.color = 'var(--text-accent)';
 
     // 状态文字
     this.statusEl = contentEl.createEl('p', {
@@ -34,6 +47,29 @@ export class ProgressModal extends Modal {
       text: '0%',
       cls: 'atomic-notes-percent',
     });
+  }
+
+  setBatchMode(total: number) {
+    this.isBatch = true;
+    this.totalFiles = total;
+    this.currentFileIndex = 0;
+    if (this.batchStatusEl) {
+      this.batchStatusEl.style.display = 'block';
+      this.updateBatchStatus();
+    }
+  }
+
+  nextFile(fileName: string) {
+    this.currentFileIndex++;
+    this.updateBatchStatus(fileName);
+    this.updateProgress(0, '准备处理...');
+  }
+
+  private updateBatchStatus(fileName?: string) {
+    if (this.batchStatusEl) {
+      const nameText = fileName ? ` - ${fileName}` : '';
+      this.batchStatusEl.setText(`批量处理进度: ${this.currentFileIndex}/${this.totalFiles} 篇${nameText}`);
+    }
   }
 
   updateProgress(percent: number, customStatus?: string) {

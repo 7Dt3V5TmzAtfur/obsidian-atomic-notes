@@ -1,8 +1,10 @@
-import { Plugin, TFile, Notice } from 'obsidian';
+import { Plugin, TFile, Notice, TFolder } from 'obsidian';
 import { PluginSettings, DEFAULT_SETTINGS, AtomicCard } from './types';
 import { AtomicNotesSettingTab } from './settings';
 import { LLMService } from './services/llm-service';
 import { LinkResolver } from './services/link-resolver';
+import { UndoService, FileOperation } from './services/undo-service';
+import { CanvasService } from './services/canvas-service';
 import { ProgressModal } from './ui/progress-modal';
 import { PreviewModal } from './ui/preview-modal';
 
@@ -10,16 +12,18 @@ export default class AtomicNotesPlugin extends Plugin {
   settings: PluginSettings;
   llmService: LLMService;
   linkResolver: LinkResolver;
+  undoService: UndoService;
+  canvasService: CanvasService;
 
   async onload() {
-    console.log('Loading Atomic Notes plugin');
-
     // 1. 加载设置
     await this.loadSettings();
 
     // 2. 初始化服务
     this.llmService = new LLMService(this.settings);
     this.linkResolver = new LinkResolver(this.app.vault);
+    this.undoService = new UndoService(this.app);
+    this.canvasService = new CanvasService();
 
     // 3. 添加设置页面
     this.addSettingTab(new AtomicNotesSettingTab(this.app, this));
@@ -31,6 +35,18 @@ export default class AtomicNotesPlugin extends Plugin {
       callback: () => this.decomposeCurrentNote(),
     });
 
+    this.addCommand({
+      id: 'undo-generation',
+      name: '撤销上一次拆解 (Undo)',
+      callback: () => this.undoService.undo(),
+    });
+
+    this.addCommand({
+      id: 'redo-generation',
+      name: '重做上一次拆解 (Redo)',
+      callback: () => this.undoService.redo(),
+    });
+
     // 5. 添加右键菜单
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file) => {
@@ -40,6 +56,13 @@ export default class AtomicNotesPlugin extends Plugin {
               .setTitle('🧩 拆解为原子卡片')
               .setIcon('split')
               .onClick(() => this.decomposeNote(file));
+          });
+        } else if (file instanceof TFolder) {
+          menu.addItem((item) => {
+            item
+              .setTitle('🧩 拆解文件夹内所有笔记')
+              .setIcon('layers')
+              .onClick(() => this.decomposeFolder(file));
           });
         }
       })
@@ -66,6 +89,119 @@ export default class AtomicNotesPlugin extends Plugin {
     await this.decomposeNote(activeFile);
   }
 
+  async decomposeFolder(folder: TFolder) {
+    const files: TFile[] = [];
+    // 递归获取所有 markdown 文件
+    const collectFiles = (f: TFolder) => {
+      for (const child of f.children) {
+        if (child instanceof TFile && child.extension === 'md') {
+          files.push(child);
+        } else if (child instanceof TFolder) {
+          collectFiles(child);
+        }
+      }
+    };
+    collectFiles(folder);
+
+    if (files.length === 0) {
+      new Notice('文件夹内没有 Markdown 笔记');
+      return;
+    }
+
+    new Notice(`开始批量处理 ${files.length} 篇笔记...`);
+    await this.batchDecompose(files);
+  }
+
+  async batchDecompose(files: TFile[]) {
+    if (this.settings.provider !== 'ollama' && !this.settings.apiKey) {
+      new Notice('请先在设置中配置 API Key');
+      return;
+    }
+
+    const progressModal = new ProgressModal(this.app);
+    progressModal.open();
+    progressModal.setBatchMode(files.length);
+
+    const allOps: FileOperation[] = [];
+    let successTotal = 0;
+    let failTotal = 0;
+
+    try {
+      for (const file of files) {
+        progressModal.nextFile(file.basename);
+
+        try {
+          const content = await this.app.vault.read(file);
+          if (!content.trim()) {
+            continue;
+          }
+
+          const cards = await this.processNoteAI(content, (p, msg) => {
+             progressModal.updateProgress(p, msg);
+          }, file.basename);
+
+          // false = Do not commit transaction yet
+          const ops = await this.createCards(file, cards, false);
+          if (ops && ops.length > 0) {
+            allOps.push(...ops);
+            successTotal++;
+          }
+        } catch (err) {
+          console.error(`处理文件失败 ${file.path}:`, err);
+          failTotal++;
+        }
+      }
+    } finally {
+      progressModal.close();
+      if (allOps.length > 0) {
+        this.undoService.addTransaction(allOps);
+        new Notice(`批量处理完成: 成功 ${successTotal}, 失败 ${failTotal}. 已记录 Undo。`, 5000);
+      } else {
+        new Notice(`批量处理结束，未生成任何卡片。`, 4000);
+      }
+    }
+  }
+
+  async processNoteAI(content: string, updateProgress: (percent: number, msg?: string) => void, title: string = ''): Promise<AtomicCard[]> {
+      updateProgress(10, '正在分析笔记内容...');
+
+      // 提取图片
+      const images = await this.extractImages(content);
+      if (images.length > 0) {
+        updateProgress(15, `发现 ${images.length} 张图片，准备进行多模态分析...`);
+      }
+
+      const tags = this.getSmartTags();
+
+      updateProgress(20, '正在调用 AI 进行拆解...');
+      const response = await this.llmService.decompose(content, title, tags, images);
+
+      if (!response.success || !response.data) {
+        throw new Error(response.error || 'LLM 拆解失败');
+      }
+
+      const cards = response.data.cards;
+      if (!cards || cards.length === 0) {
+        throw new Error('未能识别到任何原子概念');
+      }
+
+      updateProgress(45, '正在验证卡片关联...');
+      for (const card of cards) {
+        if (card.relations && card.relations.length > 0) {
+          const concepts = card.relations.map(r => r.concept);
+          const validated = this.linkResolver.validateConcepts(concepts);
+          if (validated.length > 0) {
+            card.relations = card.relations.map((r, index) => ({
+              logic: r.logic,
+              concept: validated[index] || r.concept
+            }));
+          }
+        }
+      }
+      updateProgress(75, '准备生成卡片...');
+      return cards;
+  }
+
   async decomposeNote(file: TFile) {
     // 检查 API Key（Ollama 可能不需要）
     if (this.settings.provider !== 'ollama' && !this.settings.apiKey) {
@@ -85,51 +221,13 @@ export default class AtomicNotesPlugin extends Plugin {
     progressModal.open();
 
     try {
-      // 步骤1: 分析笔记结构 (0-30%)
-      progressModal.updateProgress(10);
-
-      const response = await this.llmService.decompose(content);
-
-      if (!response.success || !response.data) {
-        throw new Error(response.error || 'LLM 拆解失败');
-      }
-
-      const cards = response.data.cards;
-
-      if (!cards || cards.length === 0) {
-        throw new Error('未能识别到任何原子概念，请检查笔记内容');
-      }
-
-      // 步骤2: 识别核心概念 (30-60%)
-      progressModal.updateProgress(45);
-
-      // 优化关联概念：尝试匹配现有笔记，但保留无法匹配的概念
-      for (const card of cards) {
-        if (card.relations && card.relations.length > 0) {
-          // 提取概念名称进行验证
-          const concepts = card.relations.map(r => r.concept);
-          const validated = this.linkResolver.validateConcepts(concepts);
-
-          // 如果找到了匹配的笔记，更新概念名称；否则保留原始概念
-          if (validated.length > 0) {
-            // 更新每个关联的 concept 为匹配到的笔记名
-            card.relations = card.relations.map((r, index) => ({
-              logic: r.logic,
-              concept: validated[index] || r.concept  // 使用验证结果或保留原值
-            }));
-          }
-          // 如果一个都没匹配到，保留 LLM 原始的概念名称
-        }
-      }
-
-      // 步骤3: 建立关联 (60-90%)
-      progressModal.updateProgress(75);
-
-      // 短暂延迟，让用户看到进度
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // 复用 processNoteAI 逻辑
+      const cards = await this.processNoteAI(content, (p, msg) => {
+        progressModal.updateProgress(p, msg);
+      }, file.basename);
 
       // 步骤4: 生成卡片 (90-100%)
-      progressModal.updateProgress(95);
+      progressModal.updateProgress(95, '即将完成...');
 
       // 短暂延迟
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -180,18 +278,26 @@ export default class AtomicNotesPlugin extends Plugin {
     }
   }
 
-  async createCards(sourceFile: TFile, cards: AtomicCard[]) {
+  async createCards(sourceFile: TFile, cards: AtomicCard[], commitTransaction: boolean = true): Promise<FileOperation[]> {
+    const currentOps: FileOperation[] = [];
+    let successCount = 0;
+    let skipCount = 0;
+
     try {
       // 检查是否有卡片要创建
       if (!cards || cards.length === 0) {
-        new Notice('没有卡片需要创建');
-        return;
+        if (commitTransaction) new Notice('没有卡片需要创建');
+        return [];
       }
 
       // 确定保存位置
-      const parentPath = sourceFile.parent?.path || '';
-      const cardFolder = this.settings.defaultFolder
-        ? `${this.settings.defaultFolder}/${sourceFile.basename}-atomic`
+      let parentPath = sourceFile.parent?.path || '';
+      if (parentPath === '/') parentPath = '';
+
+      const defaultFolder = this.settings.defaultFolder ? this.settings.defaultFolder.replace(/\/$/, '') : '';
+
+      const cardFolder = defaultFolder
+        ? `${defaultFolder}/${sourceFile.basename}-atomic`
         : (parentPath ? `${parentPath}/${sourceFile.basename}-atomic` : `${sourceFile.basename}-atomic`);
 
       // 创建文件夹（如果不存在）
@@ -200,8 +306,7 @@ export default class AtomicNotesPlugin extends Plugin {
       }
 
       // 生成每张卡片
-      let successCount = 0;
-      let skipCount = 0;
+      const createdCardPaths: string[] = [];
 
       for (const card of cards) {
         // 清理标题中的非法字符
@@ -212,6 +317,10 @@ export default class AtomicNotesPlugin extends Plugin {
         if (await this.app.vault.adapter.exists(fileName)) {
           console.warn(`文件已存在，跳过: ${fileName}`);
           skipCount++;
+          // 如果文件已存在，是否包含在 canvas 中？
+          // 通常来说应该包含，因为这是本次拆解的上下文。
+          // 这里假设只要是相关的卡片都加入 Canvas
+          createdCardPaths.push(fileName);
           continue;
         }
 
@@ -219,6 +328,8 @@ export default class AtomicNotesPlugin extends Plugin {
 
         try {
           await this.app.vault.create(fileName, fileContent);
+          currentOps.push({ type: 'create', path: fileName });
+          createdCardPaths.push(fileName);
           successCount++;
         } catch (err) {
           console.error(`创建文件失败: ${fileName}`, err);
@@ -226,20 +337,63 @@ export default class AtomicNotesPlugin extends Plugin {
         }
       }
 
+      // 4. 生成 Canvas 文件 (New)
+      if (createdCardPaths.length > 0) {
+        try {
+            const canvasData = this.canvasService.generateCanvas(sourceFile, createdCardPaths);
+            const canvasFileName = `${sourceFile.basename}-atomic.canvas`;
+            // Canvas 通常保存在卡片目录同级，或者是卡片目录内？
+            // 需求：文件名 {originalNoteBaseName}-atomic.canvas
+            // 放在原笔记同级比较合理，或者放在 defaultFolder
+
+            // 沿用 cardFolder 的父目录逻辑
+            const canvasPath = defaultFolder
+                ? `${defaultFolder}/${canvasFileName}`
+                : (parentPath ? `${parentPath}/${canvasFileName}` : canvasFileName);
+
+            // 检查是否存在
+            if (!await this.app.vault.adapter.exists(canvasPath)) {
+                await this.app.vault.create(canvasPath, JSON.stringify(canvasData, null, 2));
+                currentOps.push({ type: 'create', path: canvasPath });
+            } else {
+                new Notice(`Canvas 文件已存在: ${canvasFileName}`, 3000);
+            }
+        } catch (err) {
+            console.error('生成 Canvas 失败:', err);
+            new Notice('生成 Canvas 失败');
+        }
+      }
+
       // 在原笔记添加横幅（仅当保留原笔记且启用横幅时）
       if (this.settings.keepOriginalNote && this.settings.addBanner && successCount > 0) {
-        const timestamp = new Date().toISOString().split('T')[0];
-        const banner = `\n\n---\n## 📦 已拆解为原子卡片\n\n**拆解时间**: ${timestamp}\n**卡片数量**: ${successCount}\n**保存位置**: \`${cardFolder}\`\n\n${cards.slice(0, successCount).map(c => `- [[${this.sanitizeFileName(c.title)}]]`).join('\n')}\n`;
+        const timestamp = new Date().toLocaleString();
+        const cardLinks = cards.slice(0, successCount).map(c => `[[${this.sanitizeFileName(c.title)}]]`).join(' · ');
+
+        const banner = `> [!info] 📋 本笔记已拆解为原子卡片
+> **拆解时间**: ${timestamp}
+> **生成卡片**: ${cardLinks}
+> **操作**: [[撤销拆解|点击撤销]]
+>
+> ---
+>
+`;
 
         const originalContent = await this.app.vault.read(sourceFile);
-        await this.app.vault.modify(sourceFile, originalContent + banner);
+
+        // 记录修改前的状态
+        currentOps.push({ type: 'modify', path: sourceFile.path, previousContent: originalContent });
+
+        // Prepend banner to the top of the file
+        await this.app.vault.modify(sourceFile, banner + originalContent);
       }
 
       // 显示结果通知（Toast 通知）
-      if (successCount > 0) {
-        new Notice(`✅ 已生成 ${successCount} 张原子卡片${skipCount > 0 ? `（跳过 ${skipCount} 个已存在）` : ''}`, 5000);
-      } else {
-        new Notice('⚠️ 没有创建任何卡片', 4000);
+      if (commitTransaction) {
+        if (successCount > 0) {
+            new Notice(`✅ 已生成 ${successCount} 张原子卡片${skipCount > 0 ? `（跳过 ${skipCount} 个已存在）` : ''}`, 5000);
+        } else {
+            new Notice('⚠️ 没有创建任何卡片', 4000);
+        }
       }
 
     } catch (error) {
@@ -258,8 +412,17 @@ export default class AtomicNotesPlugin extends Plugin {
         }
       }
 
-      new Notice(`❌ ${errorMessage}`, 5000);
+      if (commitTransaction) {
+        new Notice(`❌ ${errorMessage}`, 5000);
+      }
+    } finally {
+      // 提交事务到 UndoService (保证原子性：无论成功或部分失败，都记录已执行的操作)
+      if (commitTransaction && currentOps.length > 0) {
+        this.undoService.addTransaction(currentOps);
+      }
     }
+
+    return currentOps;
   }
 
   /**
@@ -286,7 +449,7 @@ tags: ${card.tags.join(', ')}
 - **说明**：${card.explanation}`;
 
     const relations = card.relations.length > 0
-      ? `\n- **关联**：${card.relations.map(r => `${r.logic} [[${r.concept}]]`).join('；')}`
+      ? `\n- **关联**：${card.relations.map(r => `[${r.logic}] [[${r.concept}]]`).join('; ')}`
       : '';
 
     const position = [];
@@ -297,7 +460,7 @@ tags: ${card.tags.join(', ')}
       position.push(`[向下拆解] ${card.position.children.map(c => `[[${c}]]`).join(', ')}`);
     }
     const positionStr = position.length > 0
-      ? `\n- **位置**：${position.join('；')}`
+      ? `\n- **位置**：${position.join('; ')}`
       : '';
 
     return frontmatter + content + relations + positionStr;
@@ -313,7 +476,69 @@ tags: ${card.tags.join(', ')}
     this.llmService = new LLMService(this.settings);
   }
 
+  getSmartTags(): string[] {
+    if (!this.settings.smartTags) return [];
+
+    const tagCounts = (this.app.metadataCache as any).getTags() as Record<string, number>;
+    // tagCounts is Record<string, number> where string is tag (e.g., "#tag") and number is count
+
+    return Object.entries(tagCounts)
+      .sort((a, b) => b[1] - a[1]) // Sort by count desc
+      .slice(0, 100) // Top 100
+      .map(([tag]) => tag); // Extract tag name
+  }
+
+  /**
+   * 从笔记内容中提取图片，并转换为 base64
+   */
+  async extractImages(content: string): Promise<string[]> {
+    const images: string[] = [];
+    const imageRegex = /!\[\[(.*?)\]\]|!\[.*?\]\((.*?)\)/g;
+    let match;
+
+    while ((match = imageRegex.exec(content)) !== null) {
+      const linkText = match[1] || match[2];
+      if (!linkText) continue;
+
+      // Clean up link text (remove size info like |100)
+      const cleanLink = linkText.split('|')[0];
+
+      const file = this.app.metadataCache.getFirstLinkpathDest(cleanLink, '');
+      if (file && file instanceof TFile && ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(file.extension.toLowerCase())) {
+        try {
+            const binary = await this.app.vault.readBinary(file);
+            const base64 = this.arrayBufferToBase64(binary);
+            const mimeType = this.getMimeType(file.extension);
+            images.push(`data:${mimeType};base64,${base64}`);
+        } catch (e) {
+            console.error('Failed to read image:', cleanLink, e);
+        }
+      }
+    }
+    return images;
+  }
+
+  arrayBufferToBase64(buffer: ArrayBuffer): string {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  }
+
+  getMimeType(extension: string): string {
+    switch (extension.toLowerCase()) {
+      case 'png': return 'image/png';
+      case 'jpg':
+      case 'jpeg': return 'image/jpeg';
+      case 'gif': return 'image/gif';
+      case 'webp': return 'image/webp';
+      default: return 'image/jpeg';
+    }
+  }
+
   onunload() {
-    console.log('Unloading Atomic Notes plugin');
   }
 }
